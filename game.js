@@ -18,6 +18,7 @@ let maxDriftRecord = 0;
 
 const state = {
   velocity: 0,
+  engineRPM: 0,
   steering: 0,
   drift: 0,
   yaw: Math.PI,
@@ -69,7 +70,7 @@ function initScene() {
   scene.add(world);
 
   createEnvironment();
-  createCar();
+  createF1Car();
 
   camera.position.set(0, 5, 10);
 
@@ -142,51 +143,125 @@ function createEnvironment() {
   }
 }
 
-function createCar() {
+function createF1Car() {
   car = new THREE.Group();
   scene.add(car);
 
-  const bodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff3d4d, metalness: 0.25, roughness: 0.45 });
-  const glassMaterial = new THREE.MeshStandardMaterial({ color: 0x9ad4ff, transparent: true, opacity: 0.6, roughness: 0.15 });
-  const darkMaterial = new THREE.MeshStandardMaterial({ color: 0x101820, roughness: 0.8 });
+  // Material principal rojo F1
+  const bodyMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0xdc0000, 
+    metalness: 0.4, 
+    roughness: 0.3,
+    emissive: 0x440000
+  });
 
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.82, 4.5), bodyMaterial);
-  chassis.position.y = 0.9;
+  const blackMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x0a0a0a, 
+    roughness: 0.9 
+  });
+
+  const carbonMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x1a1a1a, 
+    roughness: 0.8,
+    metalness: 0.3
+  });
+
+  const glassMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x7db8ff, 
+    transparent: true, 
+    opacity: 0.5, 
+    roughness: 0.1 
+  });
+
+  // Chasis F1 - largo y bajo
+  const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 4.8), bodyMaterial);
+  chassis.position.y = 0.75;
   chassis.castShadow = true;
   chassis.receiveShadow = true;
   car.add(chassis);
 
-  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.75, 2.2), glassMaterial);
-  cabin.position.set(0, 1.6, -0.2);
-  cabin.castShadow = true;
-  car.add(cabin);
+  // Alerón frontal (ala delantera)
+  const frontWing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.15, 0.4), carbonMaterial);
+  frontWing.position.set(0, 0.5, 2.3);
+  frontWing.castShadow = true;
+  car.add(frontWing);
 
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.28, 1.3), bodyMaterial);
-  hood.position.set(0, 1.18, 1.35);
+  // Soporte del ala delantera
+  const frontWingSupport = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.35, 0.15), blackMaterial);
+  frontWingSupport.position.set(0, 0.35, 2.15);
+  car.add(frontWingSupport);
+
+  // Cockpit/Piloto (cabina muy pequeña)
+  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.55, 1.0), glassMaterial);
+  cockpit.position.set(0, 1.15, -0.3);
+  cockpit.castShadow = true;
+  car.add(cockpit);
+
+  // Capó motor (punta afilada)
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.35, 1.2), bodyMaterial);
+  hood.position.set(0, 0.95, 1.5);
   hood.castShadow = true;
   car.add(hood);
 
-  const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.22, 0.28), darkMaterial);
-  bumper.position.set(0, 0.7, 2.34);
-  bumper.castShadow = true;
-  car.add(bumper);
+  // Punta delantera (narriz típica F1)
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.8, 12), bodyMaterial);
+  nose.rotation.z = Math.PI / 2;
+  nose.position.set(0, 0.75, 2.35);
+  nose.castShadow = true;
+  car.add(nose);
 
-  const headlightLeft = new THREE.PointLight(0xfff4c7, 1.7, 18, 2);
-  headlightLeft.position.set(-0.8, 1.2, 2.55);
+  // Difusor trasero/Alerón trasero
+  const rearWing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.2, 0.35), carbonMaterial);
+  rearWing.position.set(0, 0.65, -2.2);
+  rearWing.castShadow = true;
+  car.add(rearWing);
+
+  // Soporte del ala trasera
+  const rearWingSupport = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.15), blackMaterial);
+  rearWingSupport.position.set(0, 0.3, -2.1);
+  car.add(rearWingSupport);
+
+  // Tomas de aire laterales
+  const intakeLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.4), blackMaterial);
+  intakeLeft.position.set(-0.9, 0.85, 0.5);
+  intakeLeft.castShadow = true;
+  car.add(intakeLeft);
+
+  const intakeRight = intakeLeft.clone();
+  intakeRight.position.x = 0.9;
+  car.add(intakeRight);
+
+  // Luces LED delanteras
+  const headlightLeft = new THREE.PointLight(0xfff4c7, 2.0, 20, 2);
+  headlightLeft.position.set(-0.65, 0.9, 2.4);
   car.add(headlightLeft);
 
   const headlightRight = headlightLeft.clone();
-  headlightRight.position.x = 0.8;
+  headlightRight.position.x = 0.65;
   car.add(headlightRight);
 
-  const wheelGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.55, 20);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x101010, roughness: 0.85, metalness: 0.2 });
+  // Luces traseras
+  const tailLightLeft = new THREE.PointLight(0xff2244, 1.5, 15, 2);
+  tailLightLeft.position.set(-0.65, 0.9, -2.35);
+  car.add(tailLightLeft);
+
+  const tailLightRight = tailLightLeft.clone();
+  tailLightRight.position.x = 0.65;
+  car.add(tailLightRight);
+
+  // Ruedas F1 - más estrechas y grandes
+  const wheelGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 20);
+  const wheelMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x0d0d0d, 
+    roughness: 0.85, 
+    metalness: 0.2 
+  });
 
   const wheelPositions = [
-    [-1.15, 0.55, 1.45],
-    [1.15, 0.55, 1.45],
-    [-1.15, 0.55, -1.45],
-    [1.15, 0.55, -1.45],
+    [-1.0, 0.5, 1.2],
+    [1.0, 0.5, 1.2],
+    [-1.0, 0.5, -1.4],
+    [1.0, 0.5, -1.4],
   ];
 
   wheels = [];
@@ -196,6 +271,19 @@ function createCar() {
     wheel.position.set(x, y, z);
     wheel.castShadow = true;
     wheel.receiveShadow = true;
+
+    // Llanta (rim)
+    const rimGeometry = new THREE.CylinderGeometry(0.35, 0.35, 0.38, 18);
+    const rimMaterial = new THREE.MeshStandardMaterial({ 
+      color: 0x444444, 
+      metalness: 0.6, 
+      roughness: 0.4 
+    });
+    const rim = new THREE.Mesh(rimGeometry, rimMaterial);
+    rim.rotation.z = Math.PI / 2;
+    rim.position.set(0, 0, 0);
+    wheel.add(rim);
+
     wheels.push(wheel);
     car.add(wheel);
   }
@@ -206,6 +294,7 @@ function createCar() {
 
 function resetRace() {
   state.velocity = 0;
+  state.engineRPM = 0;
   state.steering = 0;
   state.drift = 0;
   state.yaw = Math.PI;
@@ -267,16 +356,34 @@ function updateCar(dt) {
   const nitroProgress = document.getElementById('nitroProgress');
   nitroProgress.style.width = `${state.nitro}%`;
 
-  const maxSpeed = state.nitroActive ? 48 : 34;
-  const reverseMax = -14;
-  const acceleration = state.nitroActive ? 42 : 27;
-  const drag = 4.5;
-
+  // ACELERACIÓN REALISTA Y PROGRESIVA
+  const maxSpeed = state.nitroActive ? 52 : 36; // km/h
+  const reverseMax = -12;
+  
+  // Aceleración progresiva basada en velocidad actual
+  let currentAcceleration = 0;
   if (state.throttle !== 0) {
     const accelDir = state.throttle > 0 ? 1 : -1;
-    state.velocity += accelDir * acceleration * dt;
+    const currentSpeed = Math.abs(state.velocity);
+    
+    // Aceleración más alta al principio, luego disminuye
+    if (currentSpeed < maxSpeed * 0.3) {
+      currentAcceleration = 12; // 0-30% velocidad: aceleración fuerte
+    } else if (currentSpeed < maxSpeed * 0.6) {
+      currentAcceleration = 8; // 30-60% velocidad: aceleración media
+    } else if (currentSpeed < maxSpeed * 0.9) {
+      currentAcceleration = 4; // 60-90% velocidad: aceleración baja
+    } else {
+      currentAcceleration = 1; // 90%+ velocidad: casi sin aceleración (asintótica)
+    }
+
+    state.velocity += accelDir * currentAcceleration * dt;
+
+    // Motor RPM
+    state.engineRPM = clamp((Math.abs(state.velocity) / maxSpeed) * 8000, 0, 8000);
   } else {
-    state.velocity *= Math.max(0, 1 - drag * dt * 0.6);
+    state.engineRPM = lerp(state.engineRPM, 0, 0.1 * dt);
+    state.velocity *= Math.max(0, 1 - 2.5 * dt * 0.6); // Resistencia al aire
   }
 
   if (Math.abs(state.velocity) < 0.05) state.velocity = 0;
