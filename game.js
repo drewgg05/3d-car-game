@@ -15,6 +15,7 @@ let gameOver = false;
 let gameTime = 0;
 let maxSpeedRecord = 0;
 let maxDriftRecord = 0;
+let currentTrack = 0;
 
 const state = {
   velocity: 0,
@@ -30,6 +31,13 @@ const state = {
 
 const keys = {};
 
+// CIRCUITOS: definición de pistas
+const tracks = [
+  { name: 'Mónaco', color: 0x333344, width: 12, length: 200 },
+  { name: 'Suzuka', color: 0x2a2a2a, width: 14, length: 280 },
+  { name: 'Monte Carlo', color: 0x404050, width: 13, length: 240 }
+];
+
 function formatTime(totalSeconds) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = Math.floor(totalSeconds % 60);
@@ -40,36 +48,44 @@ function initScene() {
   if (renderer) return;
 
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x8ec5ff);
-  scene.fog = new THREE.Fog(0x8ec5ff, 80, 500);
+  scene.background = new THREE.Color(0x1a1f2e);
+  scene.fog = new THREE.Fog(0x1a1f2e, 120, 600);
 
-  camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 2000);
 
   renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
   document.body.appendChild(renderer.domElement);
 
-  const hemi = new THREE.HemisphereLight(0xeaf6ff, 0x2a3d2a, 1.6);
+  // Iluminación dinámica
+  const hemi = new THREE.HemisphereLight(0x87ceeb, 0x3a5c3a, 1.2);
   scene.add(hemi);
 
-  const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-  sun.position.set(50, 90, 40);
+  const sun = new THREE.DirectionalLight(0xffeb99, 2.0);
+  sun.position.set(120, 150, 80);
   sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  sun.shadow.camera.left = -180;
-  sun.shadow.camera.right = 180;
-  sun.shadow.camera.top = 180;
-  sun.shadow.camera.bottom = -180;
-  sun.shadow.camera.far = 400;
+  sun.shadow.mapSize.set(4096, 4096);
+  sun.shadow.camera.left = -300;
+  sun.shadow.camera.right = 300;
+  sun.shadow.camera.top = 300;
+  sun.shadow.camera.bottom = -300;
+  sun.shadow.camera.far = 600;
+  sun.shadow.bias = -0.0005;
   scene.add(sun);
+
+  // Luz ambiente azul para sombras
+  const ambientLight = new THREE.AmbientLight(0x4a7fbf, 0.5);
+  scene.add(ambientLight);
 
   world = new THREE.Group();
   scene.add(world);
 
-  createEnvironment();
+  buildTrack(currentTrack);
   createF1Car();
 
   camera.position.set(0, 5, 10);
@@ -79,160 +95,391 @@ function initScene() {
   window.addEventListener('resize', handleResize);
 }
 
-function createEnvironment() {
+function buildTrack(trackIndex) {
+  // Limpiar mundo anterior
+  while (world.children.length > 0) {
+    world.removeChild(world.children[0]);
+  }
+
+  const track = tracks[trackIndex];
+  document.getElementById('trackName').textContent = `Pista: ${track.name}`;
+
+  // Terreno base
   const ground = new THREE.Mesh(
-    new THREE.PlaneGeometry(600, 600),
-    new THREE.MeshStandardMaterial({ color: 0x2f6d3a, roughness: 0.96 })
+    new THREE.PlaneGeometry(800, 800),
+    new THREE.MeshStandardMaterial({
+      color: 0x2d4a2d,
+      roughness: 0.95,
+      metalness: 0
+    })
   );
   ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   world.add(ground);
 
+  // Carretera principal con diferentes estilos por pista
+  const roadMaterial = new THREE.MeshStandardMaterial({
+    color: track.color,
+    roughness: 0.6,
+    metalness: 0.2
+  });
+
   const road = new THREE.Mesh(
-    new THREE.BoxGeometry(16, 0.3, 300),
-    new THREE.MeshStandardMaterial({ color: 0x1c1c22, roughness: 0.72, metalness: 0.12 })
+    new THREE.BoxGeometry(track.width, 0.4, track.length),
+    roadMaterial
   );
-  road.position.y = 0.15;
+  road.position.y = 0.2;
   road.receiveShadow = true;
   world.add(road);
 
+  // Líneas blancas centrales
+  const lineCount = Math.floor(track.length / 12);
   const lineMaterial = new THREE.MeshStandardMaterial({
-    color: 0xf7f3da,
-    emissive: 0x5a4b19,
-    roughness: 0.3,
+    color: 0xf5f5f5,
+    emissive: 0x888888,
+    roughness: 0.4,
+    metalness: 0.1
   });
 
-  for (let z = -150; z < 150; z += 12) {
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.12, 5.5), lineMaterial);
-    stripe.position.set(0, 0.2, z);
+  for (let z = -track.length / 2; z < track.length / 2; z += 12) {
+    const stripe = new THREE.Mesh(
+      new THREE.BoxGeometry(0.5, 0.15, 6),
+      lineMaterial
+    );
+    stripe.position.set(0, 0.25, z);
     world.add(stripe);
   }
 
-  const sideLineMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
-  const leftMarker = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.12, 300), sideLineMaterial);
-  leftMarker.position.set(-8.6, 0.2, 0);
-  world.add(leftMarker);
+  // Marcas laterales de seguridad
+  const safetyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffff00,
+    emissive: 0x666600,
+    roughness: 0.3
+  });
 
-  const rightMarker = leftMarker.clone();
-  rightMarker.position.x = 8.6;
-  world.add(rightMarker);
+  const leftBarrier = new THREE.Mesh(
+    new THREE.BoxGeometry(0.3, 0.2, track.length),
+    safetyMaterial
+  );
+  leftBarrier.position.set(-track.width / 2 - 0.5, 0.25, 0);
+  world.add(leftBarrier);
 
-  for (let i = 0; i < 26; i++) {
-    const tree = new THREE.Group();
-    const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.32, 0.45, 4.2, 12),
-      new THREE.MeshStandardMaterial({ color: 0x7e4f27, roughness: 1 })
+  const rightBarrier = leftBarrier.clone();
+  rightBarrier.position.x = track.width / 2 + 0.5;
+  world.add(rightBarrier);
+
+  // Vegetación según pista
+  if (trackIndex === 0) createMonacoEnvironment(track);
+  else if (trackIndex === 1) createSuzukaEnvironment(track);
+  else createMonteCarlo(track);
+
+  // Posición de inicio
+  const startBoxGeometry = new THREE.BoxGeometry(track.width * 0.8, 0.05, 4);
+  const startBoxMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000 });
+  const startBox = new THREE.Mesh(startBoxGeometry, startBoxMaterial);
+  startBox.position.y = 0.3;
+  startBox.position.z = track.length / 2 - 10;
+  world.add(startBox);
+}
+
+function createMonacoEnvironment(track) {
+  // Edificios de Mónaco
+  const buildingMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc9a876,
+    roughness: 0.7,
+    metalness: 0
+  });
+
+  for (let i = 0; i < 8; i++) {
+    const buildingHeight = 15 + Math.random() * 25;
+    const building = new THREE.Mesh(
+      new THREE.BoxGeometry(6 + Math.random() * 4, buildingHeight, 6 + Math.random() * 4),
+      buildingMaterial
     );
-    trunk.position.y = 2.1;
+    const side = i % 2 === 0 ? -1 : 1;
+    building.position.set(
+      side * (track.width / 2 + 8 + Math.random() * 15),
+      buildingHeight / 2,
+      -track.length / 2 + i * (track.length / 8)
+    );
+    building.castShadow = true;
+    building.receiveShadow = true;
+    world.add(building);
+
+    // Ventanas
+    for (let floor = 0; floor < Math.ceil(buildingHeight / 3); floor++) {
+      for (let win = 0; win < 2; win++) {
+        const windowLight = new THREE.PointLight(0xffeb99, 0.5, 10);
+        windowLight.position.set(
+          building.position.x + (win - 0.5) * 2,
+          floor * 3 + 1,
+          building.position.z + 3
+        );
+        world.add(windowLight);
+      }
+    }
+  }
+
+  // Palmeras
+  for (let i = 0; i < 12; i++) {
+    const palm = createPalmTree();
+    const side = i % 2 === 0 ? -1 : 1;
+    palm.position.set(
+      side * (track.width / 2 + 15),
+      0,
+      -track.length / 2 + (i * track.length / 12)
+    );
+    world.add(palm);
+  }
+}
+
+function createSuzukaEnvironment(track) {
+  // Ambiente de bosque japonés
+  const treeMaterial = new THREE.MeshStandardMaterial({
+    color: 0x2d5a2d,
+    roughness: 1
+  });
+
+  for (let i = 0; i < 30; i++) {
+    const tree = new THREE.Group();
+    
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.5, 0.7, 8, 12),
+      new THREE.MeshStandardMaterial({ color: 0x5c3d2e, roughness: 1 })
+    );
+    trunk.position.y = 4;
     trunk.castShadow = true;
     tree.add(trunk);
 
     const crown = new THREE.Mesh(
-      new THREE.SphereGeometry(2.6, 18, 18),
-      new THREE.MeshStandardMaterial({ color: 0x2a8f42, roughness: 1 })
+      new THREE.SphereGeometry(3.5, 16, 16),
+      treeMaterial
     );
-    crown.position.y = 5.3;
+    crown.position.y = 7;
     crown.castShadow = true;
     tree.add(crown);
 
     const side = i % 2 === 0 ? -1 : 1;
-    const x = side * (28 + (i % 6) * 6);
-    const z = -150 + i * 12;
-    tree.position.set(x, 0, z);
+    tree.position.set(
+      side * (track.width / 2 + 12 + Math.random() * 20),
+      0,
+      -track.length / 2 + (i * track.length / 30)
+    );
     world.add(tree);
   }
+
+  // Postes de luces
+  for (let i = 0; i < 15; i++) {
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.15, 0.2, 10, 8),
+      new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.6 })
+    );
+    pole.position.set(
+      track.width / 2 + 8,
+      5,
+      -track.length / 2 + (i * track.length / 15)
+    );
+    pole.castShadow = true;
+    world.add(pole);
+
+    const light = new THREE.PointLight(0xffd700, 1.5, 40);
+    light.position.set(
+      track.width / 2 + 8,
+      10,
+      -track.length / 2 + (i * track.length / 15)
+    );
+    world.add(light);
+  }
+}
+
+function createMonteCarlo(track) {
+  // Montañas con texturas
+  const mountainMaterial = new THREE.MeshStandardMaterial({
+    color: 0x6b5d5d,
+    roughness: 0.9,
+    metalness: 0
+  });
+
+  for (let i = 0; i < 4; i++) {
+    const mountain = new THREE.Mesh(
+      new THREE.ConeGeometry(50 + i * 20, 60 + i * 30, 8),
+      mountainMaterial
+    );
+    mountain.position.set(
+      (i % 2 === 0 ? -1 : 1) * (track.width / 2 + 80 + i * 40),
+      30 + i * 20,
+      -track.length / 2 + i * (track.length / 4)
+    );
+    mountain.castShadow = true;
+    mountain.receiveShadow = true;
+    world.add(mountain);
+  }
+
+  // Agua del mar
+  const seaMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a4d7a,
+    roughness: 0.5,
+    metalness: 0.3
+  });
+
+  const sea = new THREE.Mesh(
+    new THREE.PlaneGeometry(400, 600),
+    seaMaterial
+  );
+  sea.rotation.x = -Math.PI / 2;
+  sea.position.set(-200, 0.1, 0);
+  sea.receiveShadow = true;
+  world.add(sea);
+
+  // Farola costera
+  const lighthouse = new THREE.Group();
+  const lightTower = new THREE.Mesh(
+    new THREE.CylinderGeometry(2, 2.5, 30, 16),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 })
+  );
+  lightTower.position.y = 15;
+  lightTower.castShadow = true;
+  lighthouse.add(lightTower);
+
+  const lightTop = new THREE.Mesh(
+    new THREE.SphereGeometry(1.5, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0xffaa00, emissive: 0xff8800 })
+  );
+  lightTop.position.y = 31;
+  lightTop.castShadow = true;
+  lighthouse.add(lightTop);
+
+  const beacon = new THREE.PointLight(0xffaa00, 3, 200);
+  beacon.position.set(0, 32, 0);
+  lighthouse.add(beacon);
+
+  lighthouse.position.set(-150, 0, -track.length / 2 + 40);
+  world.add(lighthouse);
+}
+
+function createPalmTree() {
+  const palm = new THREE.Group();
+
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.6, 6, 8),
+    new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 1 })
+  );
+  trunk.position.y = 3;
+  trunk.castShadow = true;
+  palm.add(trunk);
+
+  const fronds = new THREE.Mesh(
+    new THREE.SphereGeometry(3, 12, 12),
+    new THREE.MeshStandardMaterial({ color: 0x2d8a2d, roughness: 1 })
+  );
+  fronds.position.y = 8;
+  fronds.castShadow = true;
+  palm.add(fronds);
+
+  return palm;
 }
 
 function createF1Car() {
   car = new THREE.Group();
   scene.add(car);
 
-  // Material principal rojo F1
-  const bodyMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0xdc0000, 
-    metalness: 0.4, 
+  const bodyMaterial = new THREE.MeshStandardMaterial({
+    color: 0xdc0000,
+    metalness: 0.4,
     roughness: 0.3,
     emissive: 0x440000
   });
 
-  const blackMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x0a0a0a, 
-    roughness: 0.9 
+  const blackMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0a0a0a,
+    roughness: 0.9
   });
 
-  const carbonMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x1a1a1a, 
+  const carbonMaterial = new THREE.MeshStandardMaterial({
+    color: 0x1a1a1a,
     roughness: 0.8,
     metalness: 0.3
   });
 
-  const glassMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x7db8ff, 
-    transparent: true, 
-    opacity: 0.5, 
-    roughness: 0.1 
+  const glassMaterial = new THREE.MeshStandardMaterial({
+    color: 0x7db8ff,
+    transparent: true,
+    opacity: 0.5,
+    roughness: 0.1
   });
 
-  // Chasis F1 - largo y bajo
-  const chassis = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.6, 4.8), bodyMaterial);
+  // Chasis
+  const chassis = new THREE.Mesh(
+    new THREE.BoxGeometry(1.8, 0.6, 4.8),
+    bodyMaterial
+  );
   chassis.position.y = 0.75;
   chassis.castShadow = true;
   chassis.receiveShadow = true;
   car.add(chassis);
 
-  // Alerón frontal (ala delantera)
-  const frontWing = new THREE.Mesh(new THREE.BoxGeometry(1.6, 0.15, 0.4), carbonMaterial);
+  // Alerón frontal
+  const frontWing = new THREE.Mesh(
+    new THREE.BoxGeometry(1.6, 0.15, 0.4),
+    carbonMaterial
+  );
   frontWing.position.set(0, 0.5, 2.3);
   frontWing.castShadow = true;
   car.add(frontWing);
 
-  // Soporte del ala delantera
-  const frontWingSupport = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.35, 0.15), blackMaterial);
+  const frontWingSupport = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.35, 0.15),
+    blackMaterial
+  );
   frontWingSupport.position.set(0, 0.35, 2.15);
   car.add(frontWingSupport);
 
-  // Cockpit/Piloto (cabina muy pequeña)
-  const cockpit = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.55, 1.0), glassMaterial);
+  // Cockpit
+  const cockpit = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 0.55, 1.0),
+    glassMaterial
+  );
   cockpit.position.set(0, 1.15, -0.3);
   cockpit.castShadow = true;
   car.add(cockpit);
 
-  // Capó motor (punta afilada)
-  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.35, 1.2), bodyMaterial);
+  // Capó
+  const hood = new THREE.Mesh(
+    new THREE.BoxGeometry(1.5, 0.35, 1.2),
+    bodyMaterial
+  );
   hood.position.set(0, 0.95, 1.5);
   hood.castShadow = true;
   car.add(hood);
 
-  // Punta delantera (narriz típica F1)
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.55, 0.8, 12), bodyMaterial);
+  // Narriz
+  const nose = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 0.8, 12),
+    bodyMaterial
+  );
   nose.rotation.z = Math.PI / 2;
   nose.position.set(0, 0.75, 2.35);
   nose.castShadow = true;
   car.add(nose);
 
-  // Difusor trasero/Alerón trasero
-  const rearWing = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.2, 0.35), carbonMaterial);
+  // Alerón trasero
+  const rearWing = new THREE.Mesh(
+    new THREE.BoxGeometry(1.4, 0.2, 0.35),
+    carbonMaterial
+  );
   rearWing.position.set(0, 0.65, -2.2);
   rearWing.castShadow = true;
   car.add(rearWing);
 
-  // Soporte del ala trasera
-  const rearWingSupport = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.4, 0.15), blackMaterial);
+  const rearWingSupport = new THREE.Mesh(
+    new THREE.BoxGeometry(0.1, 0.4, 0.15),
+    blackMaterial
+  );
   rearWingSupport.position.set(0, 0.3, -2.1);
   car.add(rearWingSupport);
 
-  // Tomas de aire laterales
-  const intakeLeft = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.35, 0.4), blackMaterial);
-  intakeLeft.position.set(-0.9, 0.85, 0.5);
-  intakeLeft.castShadow = true;
-  car.add(intakeLeft);
-
-  const intakeRight = intakeLeft.clone();
-  intakeRight.position.x = 0.9;
-  car.add(intakeRight);
-
-  // Luces LED delanteras
-  const headlightLeft = new THREE.PointLight(0xfff4c7, 2.0, 20, 2);
+  // Luces
+  const headlightLeft = new THREE.PointLight(0xfff4c7, 2.0, 20);
   headlightLeft.position.set(-0.65, 0.9, 2.4);
   car.add(headlightLeft);
 
@@ -240,8 +487,7 @@ function createF1Car() {
   headlightRight.position.x = 0.65;
   car.add(headlightRight);
 
-  // Luces traseras
-  const tailLightLeft = new THREE.PointLight(0xff2244, 1.5, 15, 2);
+  const tailLightLeft = new THREE.PointLight(0xff2244, 1.5, 15);
   tailLightLeft.position.set(-0.65, 0.9, -2.35);
   car.add(tailLightLeft);
 
@@ -249,12 +495,12 @@ function createF1Car() {
   tailLightRight.position.x = 0.65;
   car.add(tailLightRight);
 
-  // Ruedas F1 - más estrechas y grandes
+  // Ruedas
   const wheelGeometry = new THREE.CylinderGeometry(0.45, 0.45, 0.35, 20);
-  const wheelMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x0d0d0d, 
-    roughness: 0.85, 
-    metalness: 0.2 
+  const wheelMaterial = new THREE.MeshStandardMaterial({
+    color: 0x0d0d0d,
+    roughness: 0.85,
+    metalness: 0.2
   });
 
   const wheelPositions = [
@@ -272,23 +518,21 @@ function createF1Car() {
     wheel.castShadow = true;
     wheel.receiveShadow = true;
 
-    // Llanta (rim)
     const rimGeometry = new THREE.CylinderGeometry(0.35, 0.35, 0.38, 18);
-    const rimMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x444444, 
-      metalness: 0.6, 
-      roughness: 0.4 
+    const rimMaterial = new THREE.MeshStandardMaterial({
+      color: 0x444444,
+      metalness: 0.6,
+      roughness: 0.4
     });
     const rim = new THREE.Mesh(rimGeometry, rimMaterial);
     rim.rotation.z = Math.PI / 2;
-    rim.position.set(0, 0, 0);
     wheel.add(rim);
 
     wheels.push(wheel);
     car.add(wheel);
   }
 
-  car.position.set(0, 0.2, 55);
+  car.position.set(0, 0.2, tracks[currentTrack].length / 2 - 15);
   car.rotation.y = Math.PI;
 }
 
@@ -305,7 +549,8 @@ function resetRace() {
   state.nitro = 100;
   state.nitroActive = false;
 
-  car.position.set(0, 0.2, 55);
+  const track = tracks[currentTrack];
+  car.position.set(0, 0.2, track.length / 2 - 15);
   car.rotation.y = Math.PI;
 }
 
@@ -333,17 +578,18 @@ function handleResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
 }
 
 function updateCar(dt) {
   if (!car) return;
 
+  const track = tracks[currentTrack];
   const forward = keys.KeyW || keys.ArrowUp ? 1 : 0;
   const reverse = keys.KeyS || keys.ArrowDown ? 1 : 0;
   const steerLeft = keys.KeyA || keys.ArrowLeft ? 1 : 0;
@@ -358,36 +604,26 @@ function updateCar(dt) {
   else state.nitro = Math.min(100, state.nitro + 14 * dt);
 
   const nitroProgress = document.getElementById('nitroProgress');
-  nitroProgress.style.width = `${state.nitro}%`;
+  if (nitroProgress) nitroProgress.style.width = `${state.nitro}%`;
 
-  // ACELERACIÓN REALISTA Y PROGRESIVA
-  const maxSpeed = state.nitroActive ? 52 : 36; // km/h
+  const maxSpeed = state.nitroActive ? 52 : 36;
   const reverseMax = -12;
-  
-  // Aceleración progresiva basada en velocidad actual
-  let currentAcceleration = 0;
+
   if (state.throttle !== 0) {
     const accelDir = state.throttle > 0 ? 1 : -1;
     const currentSpeed = Math.abs(state.velocity);
-    
-    // Aceleración más alta al principio, luego disminuye
-    if (currentSpeed < maxSpeed * 0.3) {
-      currentAcceleration = 12; // 0-30% velocidad: aceleración fuerte
-    } else if (currentSpeed < maxSpeed * 0.6) {
-      currentAcceleration = 8; // 30-60% velocidad: aceleración media
-    } else if (currentSpeed < maxSpeed * 0.9) {
-      currentAcceleration = 4; // 60-90% velocidad: aceleración baja
-    } else {
-      currentAcceleration = 1; // 90%+ velocidad: casi sin aceleración (asintótica)
-    }
+
+    let currentAcceleration = 0;
+    if (currentSpeed < maxSpeed * 0.3) currentAcceleration = 12;
+    else if (currentSpeed < maxSpeed * 0.6) currentAcceleration = 8;
+    else if (currentSpeed < maxSpeed * 0.9) currentAcceleration = 4;
+    else currentAcceleration = 1;
 
     state.velocity += accelDir * currentAcceleration * dt;
-
-    // Motor RPM
     state.engineRPM = clamp((Math.abs(state.velocity) / maxSpeed) * 8000, 0, 8000);
   } else {
     state.engineRPM = lerp(state.engineRPM, 0, 0.1 * dt);
-    state.velocity *= Math.max(0, 1 - 2.5 * dt * 0.6); // Resistencia al aire
+    state.velocity *= Math.max(0, 1 - 2.5 * dt * 0.6);
   }
 
   if (Math.abs(state.velocity) < 0.05) state.velocity = 0;
@@ -426,18 +662,20 @@ function updateCar(dt) {
     }
   }
 
-  const roadHalfWidth = 8.2;
+  const roadHalfWidth = track.width / 2;
   if (car.position.x > roadHalfWidth) car.position.x = roadHalfWidth;
   if (car.position.x < -roadHalfWidth) car.position.x = -roadHalfWidth;
-  if (car.position.z > 150) car.position.z = -150;
-  if (car.position.z < -150) car.position.z = 150;
+  if (car.position.z > track.length / 2) car.position.z = -track.length / 2;
+  if (car.position.z < -track.length / 2) car.position.z = track.length / 2;
 
   const speedKmh = Math.round(Math.abs(state.velocity) * 7.2);
   maxSpeedRecord = Math.max(maxSpeedRecord, speedKmh);
   maxDriftRecord = Math.max(maxDriftRecord, Math.round(state.drift * 100));
 
-  document.getElementById('speed').textContent = `${speedKmh} km/h`;
-  document.getElementById('drift').textContent = `${Math.round(state.drift * 100)}%`;
+  const speedDisplay = document.getElementById('speed');
+  const driftDisplay = document.getElementById('drift');
+  if (speedDisplay) speedDisplay.textContent = `${speedKmh} km/h`;
+  if (driftDisplay) driftDisplay.textContent = `${Math.round(state.drift * 100)}%`;
 }
 
 function updateCamera(dt) {
@@ -465,7 +703,8 @@ function updateCamera(dt) {
 
 function updateGameTime(dt) {
   gameTime += dt;
-  document.getElementById('time').textContent = formatTime(gameTime);
+  const timeDisplay = document.getElementById('time');
+  if (timeDisplay) timeDisplay.textContent = formatTime(gameTime);
 }
 
 function endGame() {
@@ -506,7 +745,19 @@ function resumeGame() {
 function restartGame() {
   document.getElementById('pauseMenu').classList.remove('visible');
   document.getElementById('gameOver').classList.remove('visible');
-  startGame();
+  resetRace();
+  gameTime = 0;
+  maxSpeedRecord = 0;
+  maxDriftRecord = 0;
+  gameRunning = true;
+  gameOver = false;
+  gamePaused = false;
+}
+
+function selectTrack(trackIndex) {
+  currentTrack = trackIndex;
+  buildTrack(trackIndex);
+  resetRace();
 }
 
 function mainMenu() {
@@ -541,7 +792,7 @@ function loop(timestamp) {
     updateCamera(dt);
     updateGameTime(dt);
 
-    if (gameTime > 180) {
+    if (gameTime > 300) {
       endGame();
     }
   }
@@ -557,10 +808,15 @@ window.resumeGame = resumeGame;
 window.restartGame = restartGame;
 window.mainMenu = mainMenu;
 window.toggleControls = toggleControls;
+window.selectTrack = selectTrack;
 
 window.addEventListener('load', () => {
-  document.getElementById('nitroProgress').style.width = '100%';
-  document.getElementById('speed').textContent = '0 km/h';
-  document.getElementById('drift').textContent = '0%';
-  document.getElementById('time').textContent = '0:00';
+  const nitroProgress = document.getElementById('nitroProgress');
+  if (nitroProgress) nitroProgress.style.width = '100%';
+  const speedDisplay = document.getElementById('speed');
+  if (speedDisplay) speedDisplay.textContent = '0 km/h';
+  const driftDisplay = document.getElementById('drift');
+  if (driftDisplay) driftDisplay.textContent = '0%';
+  const timeDisplay = document.getElementById('time');
+  if (timeDisplay) timeDisplay.textContent = '0:00';
 });
