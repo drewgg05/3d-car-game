@@ -8,41 +8,41 @@ export class F1Car {
 
     // Propiedades físicas
     this.physics = {
-      // Masa y resistencia
-      mass: 800, // kg
+      mass: 800,
       dragCoefficient: 0.35,
       rollingResistance: 0.015,
       frontalArea: 1.5,
 
-      // Velocidades
+      // Aerodinámica simplificada
+      downforceCoefficient: 1.8,
+      aeroDragCoefficient: 0.12,
+      aeroGripBonus: 0.0,
+      aerodynamicLoad: 0.0,
+      dragForce: 0.0,
+
       velocity: new THREE.Vector3(0, 0, 0),
-      speed: 0, // Velocidad escalar
+      speed: 0,
       maxSpeed: MOVEMENT.maxSpeed,
       reverseSpeed: MOVEMENT.reverseSpeed,
 
-      // Dirección y giro
-      yaw: 0, // Ángulo de orientación (radianes)
-      steerAngle: 0, // Ángulo actual de dirección
-      targetSteerAngle: 0, // Ángulo deseado
+      yaw: 0,
+      steerAngle: 0,
+      targetSteerAngle: 0,
 
-      // Control
-      throttleInput: 0, // -1 a 1
-      steerInput: 0, // -1 a 1
-      brakeInput: 0, // 0 a 1
+      throttleInput: 0,
+      steerInput: 0,
+      brakeInput: 0,
 
-      // Fuerzas
-      traction: 0, // Fuerza de tracción actual
-      lateralForce: 0, // Fuerza lateral en curvas
+      traction: 0,
+      lateralForce: 0,
       engineForce: 0,
 
-      // Estado de agarre
-      tireGrip: 1.0, // Factor de agarre (1.0 = total agarre)
+      tireGrip: 1.0,
       isSlipping: false,
-      slipAngle: 0, // Ángulo de deslizamiento
+      slipAngle: 0,
 
-      // Inercia y suavizado
-      angularVelocity: 0, // Velocidad angular en yaw
-      weightTransfer: 0.0, // Transferencia de peso en aceleraciones laterales
+      angularVelocity: 0,
+      weightTransfer: 0.0,
     };
 
     this.wheels = [];
@@ -425,8 +425,6 @@ export class F1Car {
     this.root.add(tailLightRight);
   }
 
-  // ========== SISTEMA DE FÍSICA ARCADE-REALISTA ==========
-
   setInputs(throttle, brake, steer) {
     this.physics.throttleInput = THREE.MathUtils.clamp(throttle, -1, 1);
     this.physics.brakeInput = THREE.MathUtils.clamp(brake, 0, 1);
@@ -434,8 +432,9 @@ export class F1Car {
   }
 
   update(dt) {
-    if (dt > 0.05) dt = 0.05; // Limitar delta time para estabilidad
+    if (dt > 0.05) dt = 0.05;
 
+    this.updateAerodynamics();
     this.updateEngine(dt);
     this.updateSteering(dt);
     this.updateTireGrip(dt);
@@ -445,24 +444,36 @@ export class F1Car {
     this.updateWheels(dt);
   }
 
+  updateAerodynamics() {
+    const speedSq = this.physics.speed * this.physics.speed;
+
+    // Downforce proporcional a v²: aumenta con la velocidad
+    const downforce = this.physics.downforceCoefficient * speedSq * 0.4;
+    this.physics.aerodynamicLoad = downforce;
+
+    // Drag proporcional a v²
+    const drag = this.physics.aeroDragCoefficient * speedSq;
+    this.physics.dragForce = drag;
+
+    // Más velocidad = más carga aerodinámica = más agarre disponible
+    const gripBonus = Math.min(1.0, downforce / 2000);
+    this.physics.aeroGripBonus = gripBonus;
+  }
+
   updateEngine(dt) {
     const { throttleInput, brakeInput, speed, maxSpeed, reverseSpeed, mass } = this.physics;
 
-    // Determinar dirección de movimiento deseada
     let desiredDirection = 0;
     if (throttleInput > 0) desiredDirection = 1;
     else if (throttleInput < 0) desiredDirection = -1;
 
-    // Calcular fuerza del motor
     let maxEngineForce = 0;
 
     if (throttleInput > 0) {
-      // Aceleración
       const speedFraction = Math.abs(speed) / maxSpeed;
       const accelerationCurve = Math.max(0, 1 - speedFraction * speedFraction);
       maxEngineForce = 45000 * throttleInput * accelerationCurve;
     } else if (brakeInput > 0) {
-      // Frenada
       maxEngineForce = -55000 * brakeInput;
     }
 
@@ -470,78 +481,58 @@ export class F1Car {
   }
 
   updateSteering(dt) {
-    const { steerInput, speed, maxSpeed, targetSteerAngle } = this.physics;
+    const { steerInput, speed, maxSpeed } = this.physics;
     const maxSteerAngle = MOVEMENT.maxSteerAngle;
-
-    // Dependencia de velocidad: a mayor velocidad, menos giro disponible
     const speedFraction = Math.abs(speed) / maxSpeed;
-    const steerReduction = 0.3 + speedFraction * 0.7; // 0.3 a 1.0
+    const steerReduction = 0.35 + speedFraction * 0.9;
     const availableSteerAngle = maxSteerAngle / steerReduction;
 
-    // Ángulo deseado de dirección
     this.physics.targetSteerAngle = steerInput * availableSteerAngle;
 
-    // Suavizar el cambio de ángulo (no cambiar instantáneamente)
     const steerSpeed = MOVEMENT.steerSensitivity;
     const steerDiff = this.physics.targetSteerAngle - this.physics.steerAngle;
     this.physics.steerAngle += steerDiff * steerSpeed * dt;
   }
 
   updateTireGrip(dt) {
-    const { speed, slipAngle, isSlipping } = this.physics;
-    const maxSpeed = this.physics.maxSpeed;
-
-    // Calcular ángulo de deslizamiento
+    const { speed, maxSpeed, lateralForce, mass } = this.physics;
     const speedFraction = Math.abs(speed) / maxSpeed;
-    const lateralAccel = Math.abs(this.physics.lateralForce) / this.physics.mass;
+    const lateralAccel = Math.abs(lateralForce) / mass;
+    const lateralGFraction = Math.min(lateralAccel / (1.5 * 9.81), 1.0);
 
-    // A mayor velocidad y mayor aceleración lateral, menos agarre
-    const maxLateralG = 1.5; // Máxima aceleración lateral en G
-    const lateralGFraction = Math.min(lateralAccel / (maxLateralG * 9.81), 1.0);
+    // Aumento de agarre por downforce
+    const gripBonus = this.physics.aeroGripBonus;
 
-    // Curva de agarre no lineal
-    let gripFactor = 1.0;
+    let gripFactor = 1.0 + gripBonus * 0.6;
     if (lateralGFraction > 0.85) {
-      // Pérdida progresiva de agarre
-      gripFactor = 1.0 - (lateralGFraction - 0.85) * 3.0;
+      gripFactor *= 1.0 - (lateralGFraction - 0.85) * 2.5;
       this.physics.isSlipping = true;
     } else {
       this.physics.isSlipping = false;
-      gripFactor = 1.0;
     }
 
-    this.physics.tireGrip = Math.max(0.3, gripFactor); // Mínimo 30% de agarre
-
-    // Almacenar ángulo de deslizamiento para visualización futura
+    this.physics.tireGrip = Math.max(0.35, gripFactor);
     this.physics.slipAngle = lateralGFraction * 0.5;
   }
 
   updateForces(dt) {
     const { speed, steerAngle, tireGrip, mass, dragCoefficient, rollingResistance } = this.physics;
 
-    // ===== FUERZA DE TRACCIÓN =====
     this.physics.traction = this.physics.engineForce;
 
-    // ===== RESISTENCIA AL AVANCE =====
-    // Drag aerodinámico (proporcional a v²)
-    const dragForce = -dragCoefficient * speed * Math.abs(speed);
+    // Resistencia al avance: drag + rolling + aero drag
+    const dragForce = -(dragCoefficient * speed * Math.abs(speed)) - this.physics.dragForce * 0.8;
+    const rollingForce = -rollingResistance * mass * 9.81 * Math.sign(speed || 1);
 
-    // Resistencia a la rodadura
-    const rollingForce = -rollingResistance * mass * 9.81 * Math.sign(speed);
-
-    // ===== FUERZA LATERAL EN CURVAS =====
-    // Depende del ángulo de dirección, velocidad y agarre
+    // Fuerza lateral en curvas con más agarre en alta velocidad
     const lateralAcceleration = speed * steerAngle * (1 + Math.abs(speed) / 30) * tireGrip;
     this.physics.lateralForce = mass * lateralAcceleration;
 
-    // ===== FUERZA TOTAL EN EJE LONGITUDINAL =====
     const totalLongitudinalForce = this.physics.traction + dragForce + rollingForce;
     const acceleration = totalLongitudinalForce / mass;
 
-    // Aplicar aceleración a la velocidad
     const newSpeed = speed + acceleration * dt;
 
-    // Limitar velocidad máxima
     if (newSpeed > 0) {
       this.physics.speed = Math.min(newSpeed, this.physics.maxSpeed);
     } else if (newSpeed < 0) {
@@ -550,7 +541,6 @@ export class F1Car {
       this.physics.speed = 0;
     }
 
-    // Inercia: reducir velocidad lentamente si no hay input
     if (this.physics.throttleInput === 0 && this.physics.brakeInput === 0) {
       this.physics.speed *= MOVEMENT.inertiaDamping;
       if (Math.abs(this.physics.speed) < 0.1) this.physics.speed = 0;
@@ -560,46 +550,35 @@ export class F1Car {
   updateVelocity(dt) {
     const { speed, yaw, steerAngle, tireGrip, lateralForce, mass } = this.physics;
 
-    // Cambio de yaw basado en dirección y velocidad
-    // Radio de giro: r = v / (v * tan(steerAngle))
     if (Math.abs(speed) > 0.5) {
-      const turnRate = (speed * Math.tan(steerAngle)) / 3.0; // 3.0 es wheelbase simplificado
+      const turnRate = (speed * Math.tan(steerAngle)) / 3.0;
       this.physics.angularVelocity = turnRate;
       this.physics.yaw += turnRate * dt;
     } else {
       this.physics.angularVelocity *= 0.9;
     }
 
-    // Vector de velocidad en dirección del yaw
     this.physics.velocity.x = Math.sin(this.physics.yaw) * speed;
     this.physics.velocity.z = Math.cos(this.physics.yaw) * speed;
   }
 
   updatePosition(dt) {
     const { velocity } = this.physics;
-
-    // Actualizar posición del coche
     this.root.position.x += velocity.x * dt;
     this.root.position.z += velocity.z * dt;
-
-    // Actualizar rotación visual
     this.root.rotation.y = this.physics.yaw;
   }
 
   updateWheels(dt) {
     const { speed, steerAngle } = this.physics;
     const wheelRadius = 0.48;
-
-    // Rotar ruedas según velocidad
     const rotationDelta = (speed / wheelRadius) * dt;
 
     this.wheels.forEach((wheelAssembly, index) => {
-      // Todas las ruedas rotan
       wheelAssembly.tire.rotation.x += rotationDelta;
       wheelAssembly.rim.rotation.x += rotationDelta;
       wheelAssembly.suspension.rotation.x += rotationDelta;
 
-      // Ruedas delanteras giran lateralmente
       if (index < 2) {
         wheelAssembly.group.rotation.y = steerAngle;
       } else {
@@ -607,8 +586,6 @@ export class F1Car {
       }
     });
   }
-
-  // ========== MÉTODOS DE UTILIDAD ==========
 
   getPosition() {
     return this.root.position.clone();
@@ -637,7 +614,6 @@ export class F1Car {
     this.physics.steerInput = 0;
     this.physics.tireGrip = 1.0;
     this.physics.isSlipping = false;
-
     this.root.position.copy(startPos);
     this.root.rotation.y = startYaw;
   }
@@ -649,6 +625,8 @@ export class F1Car {
       tireGrip: this.physics.tireGrip,
       steerAngle: this.physics.steerAngle,
       engineForce: this.physics.engineForce,
+      aerodynamicLoad: this.physics.aerodynamicLoad,
+      dragForce: this.physics.dragForce,
     };
   }
 }
