@@ -6,14 +6,12 @@ export class F1Car {
     this.root = new THREE.Group();
     this.root.name = 'F1Car';
 
-    // Propiedades físicas
     this.physics = {
       mass: 800,
       dragCoefficient: 0.35,
       rollingResistance: 0.015,
       frontalArea: 1.5,
 
-      // Aerodinámica simplificada
       downforceCoefficient: 1.8,
       aeroDragCoefficient: 0.12,
       aeroGripBonus: 0.0,
@@ -43,6 +41,17 @@ export class F1Car {
 
       angularVelocity: 0,
       weightTransfer: 0.0,
+
+      collisionRadius: 1.8,
+      collisionZones: {
+        chassis: { radius: 1.1, offset: new THREE.Vector3(0, 0.5, 0) },
+        front: { radius: 0.9, offset: new THREE.Vector3(0, 0.4, 2.3) },
+        rear: { radius: 0.9, offset: new THREE.Vector3(0, 0.4, -2.3) },
+        wheelFL: { radius: 0.5, offset: new THREE.Vector3(-1.0, 0.4, 1.3) },
+        wheelFR: { radius: 0.5, offset: new THREE.Vector3(1.0, 0.4, 1.3) },
+        wheelRL: { radius: 0.5, offset: new THREE.Vector3(-1.0, 0.4, -1.3) },
+        wheelRR: { radius: 0.5, offset: new THREE.Vector3(1.0, 0.4, -1.3) },
+      },
     };
 
     this.wheels = [];
@@ -446,26 +455,18 @@ export class F1Car {
 
   updateAerodynamics() {
     const speedSq = this.physics.speed * this.physics.speed;
-
-    // Downforce proporcional a v²: aumenta con la velocidad
     const downforce = this.physics.downforceCoefficient * speedSq * 0.4;
     this.physics.aerodynamicLoad = downforce;
 
-    // Drag proporcional a v²
     const drag = this.physics.aeroDragCoefficient * speedSq;
     this.physics.dragForce = drag;
 
-    // Más velocidad = más carga aerodinámica = más agarre disponible
     const gripBonus = Math.min(1.0, downforce / 2000);
     this.physics.aeroGripBonus = gripBonus;
   }
 
   updateEngine(dt) {
-    const { throttleInput, brakeInput, speed, maxSpeed, reverseSpeed, mass } = this.physics;
-
-    let desiredDirection = 0;
-    if (throttleInput > 0) desiredDirection = 1;
-    else if (throttleInput < 0) desiredDirection = -1;
+    const { throttleInput, brakeInput, speed, maxSpeed } = this.physics;
 
     let maxEngineForce = 0;
 
@@ -496,11 +497,8 @@ export class F1Car {
 
   updateTireGrip(dt) {
     const { speed, maxSpeed, lateralForce, mass } = this.physics;
-    const speedFraction = Math.abs(speed) / maxSpeed;
     const lateralAccel = Math.abs(lateralForce) / mass;
     const lateralGFraction = Math.min(lateralAccel / (1.5 * 9.81), 1.0);
-
-    // Aumento de agarre por downforce
     const gripBonus = this.physics.aeroGripBonus;
 
     let gripFactor = 1.0 + gripBonus * 0.6;
@@ -520,11 +518,9 @@ export class F1Car {
 
     this.physics.traction = this.physics.engineForce;
 
-    // Resistencia al avance: drag + rolling + aero drag
     const dragForce = -(dragCoefficient * speed * Math.abs(speed)) - this.physics.dragForce * 0.8;
     const rollingForce = -rollingResistance * mass * 9.81 * Math.sign(speed || 1);
 
-    // Fuerza lateral en curvas con más agarre en alta velocidad
     const lateralAcceleration = speed * steerAngle * (1 + Math.abs(speed) / 30) * tireGrip;
     this.physics.lateralForce = mass * lateralAcceleration;
 
@@ -548,7 +544,7 @@ export class F1Car {
   }
 
   updateVelocity(dt) {
-    const { speed, yaw, steerAngle, tireGrip, lateralForce, mass } = this.physics;
+    const { speed, yaw, steerAngle } = this.physics;
 
     if (Math.abs(speed) > 0.5) {
       const turnRate = (speed * Math.tan(steerAngle)) / 3.0;
@@ -585,6 +581,66 @@ export class F1Car {
         wheelAssembly.group.rotation.y = 0;
       }
     });
+  }
+
+  getCollisionZones() {
+    const zones = [];
+    const { collisionZones } = this.physics;
+
+    Object.entries(collisionZones).forEach(([key, zone]) => {
+      const offset = zone.offset.clone();
+      const worldOffset = offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), this.root.rotation.y);
+      zones.push({
+        key,
+        radius: zone.radius,
+        center: new THREE.Vector3(
+          this.root.position.x + worldOffset.x,
+          this.root.position.y + worldOffset.y,
+          this.root.position.z + worldOffset.z
+        ),
+      });
+    });
+
+    return zones;
+  }
+
+  resolveCollisionWithSolid(collisionInfo) {
+    const impactNormal = collisionInfo.normal.clone();
+    const impactDirection = new THREE.Vector3(
+      this.physics.velocity.x,
+      0,
+      this.physics.velocity.z
+    );
+
+    const frontImpact = collisionInfo.contactPoint.distanceTo(
+      new THREE.Vector3(this.root.position.x, 0, this.root.position.z + 2.3)
+    ) < 1.5;
+    const sideImpact = !frontImpact;
+
+    const speedBefore = this.physics.speed;
+    const velocityLength = this.physics.velocity.length();
+
+    const bounceFactor = 0.12;
+    const response = impactNormal.clone().multiplyScalar(bounceFactor * velocityLength);
+    this.physics.velocity.add(response);
+
+    if (frontImpact) {
+      this.physics.speed *= 0.18;
+      this.physics.velocity.multiplyScalar(0.3);
+    } else if (sideImpact) {
+      const lateral = new THREE.Vector3(-impactNormal.z, 0, impactNormal.x).normalize();
+      this.physics.velocity.addScaledVector(lateral, 0.7 * velocityLength);
+      this.physics.speed *= 0.5;
+      this.physics.yaw += 0.25 * Math.sign(impactNormal.x || 1);
+    }
+
+    if (Math.abs(this.physics.speed) < 1.0) {
+      this.physics.speed = 0;
+    }
+
+    // Ajustar posición para sacar el coche del obstáculo
+    const penetration = collisionInfo.depth || 0.2;
+    this.root.position.add(impactNormal.clone().multiplyScalar(penetration * 1.5));
   }
 
   getPosition() {
